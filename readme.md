@@ -44,7 +44,8 @@
 - `bash scripts/logs.sh worker`
 - `bash scripts/submit_job.sh /data/multimedia-ana/your_video.mp4`
 - `bash scripts/benchmark_two_jobs.sh /data/multimedia-ana/your_video.mp4`
-- `bash scripts/benchmark_n_jobs.sh /data/multimedia-ana/your_video.mp4 5`
+- `bash scripts/benchmark_n_jobs.sh 5`
+  默认循环输入 `/data/multimedia-ana/example-video/` 下的视频，也可用 `VIDEO_DIR=/your/path` 覆盖目录。
 
 联调脚本：
 - `bash scripts/smoke_test_video_vl.sh /path/to/video.mp4`

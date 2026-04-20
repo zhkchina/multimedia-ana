@@ -1,0 +1,57 @@
+x-video-vl-common-env: &video_vl_common_env
+  DATA_ROOT: /data/multimedia-ana
+  HOME: /data/multimedia-ana/video-vl/cache/home
+  USER: kun
+  LOGNAME: kun
+  SERVICE_NAME: video-vl
+  HOST_PROJECT_DIR: /home/kun/tools/multimedia-ana
+  HOST_UID: 1001
+  HOST_GID: 1003
+  VIDEO_VL_MODEL_ID: Qwen/Qwen3-VL-8B-Instruct
+  HF_HOME: /data/multimedia-ana/video-vl/cache/huggingface
+
+services:
+  docker-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: multimedia-ana-api:local
+    container_name: multimedia-ana-api
+    restart: unless-stopped
+    user: "1001:1003"
+    group_add:
+      - "1002"
+    environment:
+      <<: *video_vl_common_env
+      APP_TITLE: Multimedia Analysis API
+      API_PORT: 7860
+      DOCKER_GID: 1002
+      WORKER_IMAGE: multimedia-ana-video-vl-worker:local
+      WORKER_CONTAINER_NAME: multimedia-ana-video-vl-worker
+      WORKER_SHM_SIZE: 16g
+      WORKER_IDLE_TIMEOUT_SECONDS: 1800
+      WORKER_POLL_INTERVAL_SECONDS: 3
+    ports:
+      - "0.0.0.0:18086:7860"
+    volumes:
+      - .:/workspace:ro
+      - /data/multimedia-ana:/data/multimedia-ana
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  video-vl-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: multimedia-ana-video-vl-worker:local
+    user: "1001:1003"
+    environment:
+      <<: *video_vl_common_env
+      WORKER_CONTAINER_NAME: multimedia-ana-video-vl-worker
+      WORKER_IDLE_TIMEOUT_SECONDS: 1800
+      WORKER_POLL_INTERVAL_SECONDS: 3
+    volumes:
+      - .:/workspace:ro
+      - /data/multimedia-ana:/data/multimedia-ana
+    command: ["python3", "-m", "app.worker.worker_entry"]
+    gpus: all
+    shm_size: 16g
