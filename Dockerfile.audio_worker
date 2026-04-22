@@ -1,0 +1,18 @@
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /workspace
+
+COPY requirements/audio_worker.txt /tmp/requirements-audio-worker.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r /tmp/requirements-audio-worker.txt
+
+COPY app /workspace/app
+
+CMD ["python3", "-m", "app.audio_worker.worker_entry"]

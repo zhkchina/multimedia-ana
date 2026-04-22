@@ -11,10 +11,10 @@ from app.core.logging_utils import configure_logging
 from app.core.settings import Settings
 
 
-class WorkerScheduler:
+class AudioWorkerScheduler:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.logger = configure_logging("multimedia_ana.scheduler", settings.api_log_level, settings.scheduler_log_file)
+        self.logger = configure_logging("multimedia_ana.audio.scheduler", settings.api_log_level, settings.scheduler_log_file)
         self._lock = threading.Lock()
         self._client = docker.from_env()
 
@@ -52,15 +52,15 @@ class WorkerScheduler:
                 container.reload()
                 if container.status == "running":
                     return self.worker_status()
-                self.logger.info("Removing stale worker container with status=%s", container.status)
+                self.logger.info("Removing stale audio worker container with status=%s", container.status)
                 container.remove(force=True)
 
-            self.logger.info("Starting worker container from image %s", self.settings.worker_image)
+            self.logger.info("Starting audio worker container from image %s", self.settings.worker_image)
             kwargs: dict[str, Any] = {
                 "image": self.settings.worker_image,
                 "name": self.settings.worker_container_name,
                 "network": self.settings.worker_network_name,
-                "command": ["python3", "-m", "app.worker.worker_entry"],
+                "command": ["python3", "-m", "app.audio_worker.worker_entry"],
                 "detach": True,
                 "shm_size": self.settings.worker_shm_size,
                 "user": f"{self.settings.host_uid}:{self.settings.host_gid}",
@@ -76,7 +76,10 @@ class WorkerScheduler:
                     "HOST_GID": str(self.settings.host_gid),
                     "WORKER_IDLE_TIMEOUT_SECONDS": str(self.settings.worker_idle_timeout_seconds),
                     "WORKER_POLL_INTERVAL_SECONDS": str(self.settings.worker_poll_interval_seconds),
-                    "VIDEO_VL_MODEL_ID": self.settings.video_vl_model_id,
+                    "AUDIO_MODEL_ID": self.settings.audio_model_id,
+                    "AUDIO_VAD_MODEL_ID": self.settings.audio_vad_model_id,
+                    "AUDIO_DEVICE": self.settings.audio_device,
+                    "MODELSCOPE_CACHE": str(self.settings.cache_dir / "modelscope"),
                     "HF_HOME": str(self.settings.cache_dir / "huggingface"),
                     "WORKER_LOG_LEVEL": self.settings.worker_log_level,
                 },
@@ -93,7 +96,7 @@ class WorkerScheduler:
             except ImageNotFound as exc:
                 raise RuntimeError(
                     f"worker image 不存在: {self.settings.worker_image}。"
-                    "请先执行 `docker compose build video-vl-worker` 或 `docker compose build`。"
+                    "请先执行 `docker compose build audio-worker` 或 `docker compose build`。"
                 ) from exc
             return self.worker_status()
 
@@ -102,7 +105,7 @@ class WorkerScheduler:
             container = self._container()
             if container is None:
                 return self.worker_status()
-            self.logger.info("Stopping worker container %s", container.name)
+            self.logger.info("Stopping audio worker container %s", container.name)
             container.remove(force=True)
             return self.worker_status()
 

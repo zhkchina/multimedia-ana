@@ -17,10 +17,14 @@
 - [Qwen3-VL Transformers 后端说明](./docs/qwen3-vl-transformers-backend.md)
   - 含当前性能测试结论、队列复用结论、GPU 占用统计和 `flash_attention_2` 评估
 - [工程完备性差距分析](./docs/engineering-gap-analysis.md)
+- [FunASR 音频服务接入方案](./docs/funasr-audio-service-plan.md)
+  - 含 `SenseVoiceSmall + fsmn-vad` 选型、API 方案、Docker 镜像与部署建议
 
 当前已实现：
 - 常驻 `docker-api` FastAPI 控制面
 - 按需拉起 `video-vl` worker 容器
+- `video-scene` 单容器 API
+- `video-scene` 独立 `qa/` 测试目录与 Docker 化测试入口
 - worker 空闲默认保活 `1800s`，减少队列场景下的重复冷启动
 - 统一数据根目录：`/data/multimedia-ana`
 - 宿主机高位端口对外暴露：`18086`
@@ -33,11 +37,14 @@
 - `docker compose build`
 - `docker compose up -d docker-api`
 - 如果只想单独补构建 worker：`docker compose build video-vl-worker`
+- 如果只想单独构建 `video-scene` 镜像：`bash scripts/build.sh scene`
+- 如果只启动 `video-scene`：`docker compose up -d video-scene`
 
 常规运维脚本：
 - `bash scripts/build.sh`
 - `bash scripts/build.sh api`
 - `bash scripts/build.sh worker`
+- `bash scripts/build.sh scene`
 - `bash scripts/up.sh`
 - `bash scripts/down.sh`
 - `bash scripts/logs.sh api`
@@ -52,6 +59,19 @@
 - 默认调用 `http://127.0.0.1:18086`
 - 默认把测试视频复制到 `/data/multimedia-ana/smoke_test_input.mp4`
 
+QA 测试：
+- `bash qa/build_image.sh`
+- `bash qa/run_suite.sh`
+- 默认批量处理 `/data/multimedia-ana/example-video/` 下所有视频
+- 测试结果归档到 `/data/multimedia-ana/testlab/video-scene/runs/`
+
+`video-scene` API：
+- `http://127.0.0.1:18087/health`
+- `POST /jobs`
+- `GET /jobs/{job_id}`
+- `GET /jobs/{job_id}/result`
+
 当前限制：
 - 首次运行 `video-vl` worker 时，如本地没有模型权重，会下载 `Qwen/Qwen3-VL-8B-Instruct` 到 `/data/multimedia-ana/video-vl/cache/huggingface`。
-- 目前只实现了 `video-vl` 服务，`scene/audio` 还未接入。
+- `video-scene` 当前采用单容器 API，任务在容器内串行执行。
+- `audio` 还未接入。

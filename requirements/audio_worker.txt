@@ -1,0 +1,4 @@
+funasr==1.2.6
+modelscope==1.24.0
+huggingface_hub==0.34.4
+numpy==1.26.4

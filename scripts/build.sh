@@ -17,8 +17,20 @@ case "${TARGET}" in
   worker|video-vl-worker)
     docker_compose build video-vl-worker
     ;;
+  audio-api)
+    docker_compose build audio-api
+    ;;
+  audio-worker)
+    docker_compose build audio-worker
+    ;;
+  audio)
+    docker_compose build audio-api audio-worker
+    ;;
+  scene|video-scene)
+    docker_compose build video-scene
+    ;;
   *)
-    echo "Usage: $0 [all|api|worker]" >&2
+    echo "Usage: $0 [all|api|worker|audio-api|audio-worker|audio|scene]" >&2
     exit 1
     ;;
 esac

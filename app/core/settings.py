@@ -23,10 +23,14 @@ class Settings:
     service_name: str = os.getenv("SERVICE_NAME", "video-vl")
     worker_image: str = os.getenv("WORKER_IMAGE", "multimedia-ana-video-vl-worker:local")
     worker_container_name: str = os.getenv("WORKER_CONTAINER_NAME", "multimedia-ana-video-vl-worker")
+    worker_network_name: str = os.getenv("WORKER_NETWORK_NAME", "multimedia-ana_default")
     worker_idle_timeout_seconds: int = _env_int("WORKER_IDLE_TIMEOUT_SECONDS", 1800)
     worker_poll_interval_seconds: int = _env_int("WORKER_POLL_INTERVAL_SECONDS", 3)
     worker_shm_size: str = os.getenv("WORKER_SHM_SIZE", "16g")
     video_vl_model_id: str = os.getenv("VIDEO_VL_MODEL_ID", "Qwen/Qwen3-VL-8B-Instruct")
+    audio_model_id: str = os.getenv("AUDIO_MODEL_ID", "iic/SenseVoiceSmall")
+    audio_vad_model_id: str = os.getenv("AUDIO_VAD_MODEL_ID", "fsmn-vad")
+    audio_device: str = os.getenv("AUDIO_DEVICE", "cuda:0")
     video_vl_prompt_template: str = (
         "请对这个视频片段进行电影镜头级语义标注，并严格输出 JSON 对象。"
         "字段包含 scene_summary、shot_type、characters、actions、emotion、location、objects、cinematic_tags、clip_value、reason。"
