@@ -56,6 +56,11 @@ class AudioWorkerScheduler:
                 container.remove(force=True)
 
             self.logger.info("Starting audio worker container from image %s", self.settings.worker_image)
+            # 注意：这里是通过 Docker SDK 动态拉起 worker，不会自动继承 docker-compose.yml
+            # 里 audio-worker service 的 volumes/environment/shm_size/user/network 等配置。
+            # 如果 docker-compose.yml 中的 worker 配置有调整，必须同步修改这里的 kwargs。
+            # 另外，修改动态 worker 的代码、镜像或运行参数后，要先删除旧的
+            # multimedia-ana-audio-worker 容器；否则后续请求可能继续复用旧 worker。
             kwargs: dict[str, Any] = {
                 "image": self.settings.worker_image,
                 "name": self.settings.worker_container_name,
@@ -86,6 +91,7 @@ class AudioWorkerScheduler:
                 "volumes": {
                     str(self.settings.host_project_dir): {"bind": "/workspace", "mode": "ro"},
                     str(self.settings.data_root): {"bind": str(self.settings.data_root), "mode": "rw"},
+                    "/data/assets": {"bind": "/data/assets", "mode": "ro"},
                 },
                 "restart_policy": {"Name": "no"},
             }

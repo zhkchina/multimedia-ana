@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import shutil
 import time
 from pathlib import Path
 
 from app.core.logging_utils import configure_logging
 from app.core.settings import Settings, get_settings
-from app.core.store import (
+from app.core.task_store import (
     STATUS_FAILED,
     STATUS_SUCCEEDED,
-    claim_next_queued_job,
+    claim_next_queued_task,
     ensure_runtime_dirs,
-    release_job_lock,
-    update_job_status,
+    store_task_error,
+    store_task_result,
     write_worker_state,
 )
 from app.worker.inference import VideoVLRunner
@@ -25,8 +26,8 @@ class WorkerService:
         self.runner = VideoVLRunner(settings, self.logger)
         self.last_active_at = time.monotonic()
 
-    def _job_output_path(self, job_id: str) -> Path:
-        return self.settings.output_dir / job_id / "analysis.json"
+    def _task_work_dir(self, task_id: str) -> Path:
+        return self.settings.runtime_dir / "tasks" / task_id
 
     def _write_state(self, status: str, **extra) -> None:
         write_worker_state(
@@ -39,38 +40,35 @@ class WorkerService:
             },
         )
 
-    def _process_job(self, request: dict) -> None:
-        job_id = request["job_id"]
-        output_path = self._job_output_path(job_id)
-        self._write_state(status="running", job_id=job_id)
-        self.logger.info("Picked up job %s", job_id)
+    def _process_task(self, request: dict) -> None:
+        task_id = request["task_id"]
+        work_dir = self._task_work_dir(task_id)
+        self._write_state(status="running", task_id=task_id)
+        self.logger.info("Picked up task %s", task_id)
         try:
-            generated_path = self.runner.analyze(request, output_path)
-            status = update_job_status(
+            result = self.runner.analyze(request)
+            status = store_task_result(
                 self.settings,
-                job_id,
-                status=STATUS_SUCCEEDED,
+                task_id,
+                result=result,
                 worker_id=self.worker_id,
-                result_files=[str(generated_path)],
-                error=None,
             )
             self.last_active_at = time.monotonic()
-            self.logger.info("Job %s finished successfully", job_id)
-            self._write_state(status="idle", last_job=status["job_id"])
+            self.logger.info("Task %s finished successfully", task_id)
+            self._write_state(status="idle", last_task=status["task_id"])
         except Exception as exc:
-            update_job_status(
+            store_task_error(
                 self.settings,
-                job_id,
-                status=STATUS_FAILED,
+                task_id,
                 worker_id=self.worker_id,
-                result_files=[],
-                error=str(exc),
+                error={"message": str(exc)},
+                status=STATUS_FAILED,
             )
             self.last_active_at = time.monotonic()
-            self.logger.exception("Job %s failed", job_id)
-            self._write_state(status="idle", last_job=job_id, last_error=str(exc))
+            self.logger.exception("Task %s failed", task_id)
+            self._write_state(status="idle", last_task=task_id, last_error=str(exc))
         finally:
-            release_job_lock(self.settings, job_id)
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     def run(self) -> None:
         ensure_runtime_dirs(self.settings)
@@ -78,9 +76,9 @@ class WorkerService:
         self._write_state(status="starting")
 
         while True:
-            request = claim_next_queued_job(self.settings, self.worker_id)
+            request = claim_next_queued_task(self.settings, self.worker_id)
             if request is not None:
-                self._process_job(request)
+                self._process_task(request)
                 continue
 
             idle_for = time.monotonic() - self.last_active_at

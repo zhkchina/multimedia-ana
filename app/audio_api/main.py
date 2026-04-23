@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
-from app.audio_api.models import HealthResponse, JobCreateRequest, JobCreateResponse
+from app.audio_api.models import HealthResponse, TaskCreateRequest
 from app.audio_api.scheduler import AudioWorkerScheduler
 from app.core.logging_utils import configure_logging
 from app.core.settings import Settings, get_settings
-from app.core.store import create_job, ensure_runtime_dirs, get_job_status, list_queued_jobs, read_worker_state
+from app.core.task_store import (
+    FINAL_STATUSES,
+    count_queued_tasks,
+    create_task,
+    ensure_runtime_dirs,
+    get_task,
+    read_worker_state,
+    wait_for_task,
+)
 
 settings: Settings = get_settings()
 logger = configure_logging("multimedia_ana.audio.api", settings.api_log_level, settings.api_log_file)
@@ -23,7 +31,31 @@ def startup() -> None:
     logger.info("Audio API server started on port %s", settings.api_port)
 
 
+def _task_status_payload(task: dict) -> dict:
+    return {
+        "id": task["task_id"],
+        "service": task["service"],
+        "status": task["status"],
+        "created_at": task["created_at"],
+        "started_at": task["started_at"],
+        "finished_at": task["finished_at"],
+        "updated_at": task["updated_at"],
+        "expires_at": task["expires_at"],
+        "error": task["error"],
+    }
+
+
+def _task_result_payload(task: dict) -> dict:
+    return {
+        "id": task["task_id"],
+        "service": task["service"],
+        "status": task["status"],
+        "result": task["result"],
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
+@app.get("/healthz", response_model=HealthResponse)
 def health() -> HealthResponse:
     ensure_runtime_dirs(settings)
     worker_status = scheduler.worker_status()
@@ -32,21 +64,27 @@ def health() -> HealthResponse:
         status="ok",
         service="audio-api",
         worker_online=worker_status["running"],
-        queued_jobs=len(list_queued_jobs(settings)),
+        queued_tasks=count_queued_tasks(settings),
         worker={**worker_status, "runtime": runtime_state},
     )
 
 
-@app.post("/jobs/asr", response_model=JobCreateResponse)
-def submit_job(payload: JobCreateRequest) -> JobCreateResponse:
-    ensure_runtime_dirs(settings)
-    audio_path = Path(payload.audio_uri)
-    if not audio_path.exists():
-        raise HTTPException(status_code=400, detail=f"audio_uri 不存在: {audio_path}")
+@app.get("/readyz")
+def ready() -> dict:
+    return {"status": "ok", "service": settings.service_name, "docker_ok": scheduler.ping()}
 
-    request_payload = payload.model_dump(mode="json")
-    job_id, status = create_job(settings, request_payload)
-    logger.info("Created audio job %s for %s", job_id, audio_path)
+
+@app.post("/v1/tasks")
+def create_audio_task(payload: TaskCreateRequest):
+    ensure_runtime_dirs(settings)
+    audio_path = Path(payload.input.file_uri)
+    if not audio_path.exists():
+        raise HTTPException(status_code=400, detail=f"file_uri 不存在: {audio_path}")
+
+    request_payload = payload.input.model_dump(mode="json")
+    request_id = (payload.metadata or {}).get("request_id") if payload.metadata else None
+    task = create_task(settings, request_payload=request_payload, request_id=request_id)
+    logger.info("Created audio task %s for %s", task["task_id"], audio_path)
 
     if not scheduler.ping():
         raise HTTPException(status_code=500, detail="Docker daemon 不可用，无法启动 worker。")
@@ -54,39 +92,40 @@ def submit_job(payload: JobCreateRequest) -> JobCreateResponse:
     try:
         scheduler.ensure_worker()
     except Exception as exc:
-        logger.exception("Failed to ensure audio worker for job %s", job_id)
+        logger.exception("Failed to ensure audio worker for task %s", task["task_id"])
         raise HTTPException(status_code=500, detail=f"启动 worker 失败: {exc}") from exc
 
-    return JobCreateResponse(job_id=job_id, status=status["status"])
+    wait_seconds = payload.options.wait_seconds
+    if wait_seconds > 0:
+        current = wait_for_task(settings, task["task_id"], wait_seconds)
+        if current["status"] in FINAL_STATUSES:
+            if current["status"] == "succeeded":
+                return _task_result_payload(current)
+            return _task_status_payload(current)
+    return JSONResponse(status_code=202, content=_task_status_payload(task), headers={"Retry-After": "5"})
 
 
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
+@app.get("/v1/tasks/{task_id}")
+def get_audio_task(task_id: str) -> dict:
     try:
-        return get_job_status(settings, job_id)
+        task = get_task(settings, task_id)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"job 不存在: {job_id}") from exc
+        raise HTTPException(status_code=404, detail=f"task 不存在: {task_id}") from exc
+    return _task_status_payload(task)
 
 
-@app.get("/jobs/{job_id}/result")
-def get_job_result(job_id: str) -> dict:
+@app.get("/v1/tasks/{task_id}/result")
+def get_audio_task_result(task_id: str):
     try:
-        status = get_job_status(settings, job_id)
+        task = get_task(settings, task_id)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"job 不存在: {job_id}") from exc
+        raise HTTPException(status_code=404, detail=f"task 不存在: {task_id}") from exc
 
-    if status["status"] != "succeeded":
-        raise HTTPException(status_code=409, detail=status)
-
-    result_files = status.get("result_files") or []
-    if not result_files:
-        raise HTTPException(status_code=404, detail="任务已完成，但未找到结果文件。")
-
-    target = Path(result_files[0])
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"结果文件不存在: {target}")
-
-    return json.loads(target.read_text(encoding="utf-8"))
+    if task["status"] not in FINAL_STATUSES:
+        return JSONResponse(status_code=202, content=_task_status_payload(task), headers={"Retry-After": "5"})
+    if task["status"] != "succeeded":
+        return JSONResponse(status_code=409, content=_task_status_payload(task))
+    return _task_result_payload(task)
 
 
 @app.post("/admin/worker/wakeup")

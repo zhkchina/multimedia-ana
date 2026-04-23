@@ -24,13 +24,24 @@ fi
 
 submit_job() {
   curl --fail --silent --show-error \
-    -X POST "${API_BASE_URL}/jobs" \
+    -X POST "${API_BASE_URL}/v1/tasks" \
     -H 'Content-Type: application/json' \
     -d "{
-      \"video_uri\": \"${VIDEO_PATH}\",
-      \"profile\": \"${PROFILE}\",
-      \"sample_fps\": ${SAMPLE_FPS},
-      \"max_frames\": ${MAX_FRAMES}
+      \"input\": {
+        \"file_uri\": \"${VIDEO_PATH}\",
+        \"messages\": [
+          {\"role\": \"system\", \"content\": \"你是一个电影视频分析助手。\"},
+          {\"role\": \"user\", \"content\": \"请输出结构化视频语义理解结果。\"}
+        ],
+        \"params\": {
+          \"profile\": \"${PROFILE}\",
+          \"sample_fps\": ${SAMPLE_FPS},
+          \"max_frames\": ${MAX_FRAMES}
+        }
+      },
+      \"options\": {
+        \"wait_seconds\": 0
+      }
     }"
 }
 
@@ -41,7 +52,7 @@ poll_job() {
   local status_response status end_ts elapsed
 
   for ((i=1; i<=MAX_POLLS; i++)); do
-    status_response="$(curl --fail --silent --show-error "${API_BASE_URL}/jobs/${job_id}")"
+    status_response="$(curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${job_id}")"
     status="$(printf '%s' "${status_response}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
     echo "[${label}] poll=${i}/${MAX_POLLS} status=${status}"
 
@@ -66,18 +77,18 @@ poll_job() {
 }
 
 echo "==> Health check"
-curl --fail --silent --show-error "${API_BASE_URL}/health"
+curl --fail --silent --show-error "${API_BASE_URL}/healthz"
 echo
 
 echo "==> Submit two jobs back-to-back"
 JOB1_START="$(date +%s)"
 JOB1_RESPONSE="$(submit_job)"
-JOB1_ID="$(printf '%s' "${JOB1_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
+JOB1_ID="$(printf '%s' "${JOB1_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 echo "job1=${JOB1_ID}"
 
 JOB2_START="$(date +%s)"
 JOB2_RESPONSE="$(submit_job)"
-JOB2_ID="$(printf '%s' "${JOB2_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
+JOB2_ID="$(printf '%s' "${JOB2_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 echo "job2=${JOB2_ID}"
 
 poll_job "${JOB1_ID}" "${JOB1_START}" "job1"
@@ -85,12 +96,8 @@ poll_job "${JOB2_ID}" "${JOB2_START}" "job2"
 
 JOB1_STATUS_JSON="$(cat "/tmp/${JOB1_ID}.status.json")"
 JOB2_STATUS_JSON="$(cat "/tmp/${JOB2_ID}.status.json")"
-JOB1_RESULT="$(printf '%s' "${JOB1_STATUS_JSON}" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("result_files") or [""])[0])')"
-JOB2_RESULT="$(printf '%s' "${JOB2_STATUS_JSON}" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("result_files") or [""])[0])')"
 
 echo "==> Summary"
 echo "job1 id: ${JOB1_ID}"
-echo "job1 result: ${JOB1_RESULT}"
 echo "job2 id: ${JOB2_ID}"
-echo "job2 result: ${JOB2_RESULT}"
 echo "check worker logs to confirm second job reused the loaded model."

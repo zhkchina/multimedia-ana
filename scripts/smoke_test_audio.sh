@@ -13,15 +13,15 @@ fi
 
 echo "Submitting audio job for ${AUDIO_FILE}"
 JOB_RESPONSE="$(curl --fail --silent --show-error \
-  -X POST "${API_BASE_URL}/jobs/asr" \
+  -X POST "${API_BASE_URL}/v1/tasks" \
   -H 'Content-Type: application/json' \
-  -d "{\"audio_uri\":\"${AUDIO_FILE}\",\"profile\":\"movie_zh\",\"language\":\"auto\"}")"
-JOB_ID="$(printf '%s' "${JOB_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
+  -d "{\"input\":{\"file_uri\":\"${AUDIO_FILE}\",\"params\":{\"profile\":\"movie_zh\",\"language\":\"auto\"}},\"options\":{\"wait_seconds\":0}}")"
+JOB_ID="$(printf '%s' "${JOB_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 echo "job_id=${JOB_ID}"
 
 START_TS="$(date +%s)"
 while true; do
-  STATUS_RESPONSE="$(curl --fail --silent --show-error "${API_BASE_URL}/jobs/${JOB_ID}")"
+  STATUS_RESPONSE="$(curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${JOB_ID}")"
   STATUS="$(printf '%s' "${STATUS_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
   echo "status=${STATUS}"
 
@@ -44,4 +44,4 @@ while true; do
 done
 
 echo "Fetching result"
-curl --fail --silent --show-error "${API_BASE_URL}/jobs/${JOB_ID}/result"
+curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${JOB_ID}/result"

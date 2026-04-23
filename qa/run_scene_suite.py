@@ -76,7 +76,7 @@ def request_bytes(url: str) -> tuple[int, bytes]:
 
 
 def healthcheck(api_base_url: str) -> dict[str, Any]:
-    status_code, payload = request_json(f"{api_base_url.rstrip('/')}/health")
+    status_code, payload = request_json(f"{api_base_url.rstrip('/')}/healthz")
     if status_code != 200:
         raise RuntimeError(f"health check failed: status={status_code} payload={payload}")
     return payload
@@ -91,13 +91,21 @@ def submit_job(
     save_image_count: int,
 ) -> tuple[int, dict[str, Any]]:
     payload = {
-        "video_uri": str(video_path),
-        "profile": profile,
-        "threshold": threshold,
-        "min_scene_len": min_scene_len,
-        "save_image_count": save_image_count,
+        "input": {
+            "file_uri": str(video_path),
+            "params": {
+                "profile": profile,
+                "threshold": threshold,
+                "min_scene_len": min_scene_len,
+                "save_image_count": save_image_count,
+                "include_artifacts": False,
+            },
+        },
+        "options": {
+            "wait_seconds": 0,
+        },
     }
-    return request_json(f"{api_base_url.rstrip('/')}/jobs", method="POST", payload=payload)
+    return request_json(f"{api_base_url.rstrip('/')}/v1/tasks", method="POST", payload=payload)
 
 
 def poll_job(api_base_url: str, job_id: str, poll_interval_seconds: float, timeout_seconds: float) -> tuple[dict[str, Any], int]:
@@ -105,7 +113,7 @@ def poll_job(api_base_url: str, job_id: str, poll_interval_seconds: float, timeo
     poll_count = 0
     while True:
         poll_count += 1
-        status_code, payload = request_json(f"{api_base_url.rstrip('/')}/jobs/{job_id}")
+        status_code, payload = request_json(f"{api_base_url.rstrip('/')}/v1/tasks/{job_id}")
         if status_code != 200:
             raise RuntimeError(f"job status request failed: status={status_code} payload={payload}")
         if payload.get("status") in FINAL_STATUSES:
@@ -116,12 +124,11 @@ def poll_job(api_base_url: str, job_id: str, poll_interval_seconds: float, timeo
 
 
 def download_result(api_base_url: str, job_id: str, target_path: Path) -> dict[str, Any]:
-    url = f"{api_base_url.rstrip('/')}/jobs/{urllib.parse.quote(job_id)}/result?download=true"
-    status_code, payload = request_bytes(url)
+    status_code, payload = request_json(f"{api_base_url.rstrip('/')}/v1/tasks/{urllib.parse.quote(job_id)}/result")
     if status_code != 200:
-        raise RuntimeError(f"result download failed: status={status_code} payload={payload.decode('utf-8', errors='replace')}")
-    target_path.write_bytes(payload)
-    return json.loads(payload.decode("utf-8"))
+        raise RuntimeError(f"result download failed: status={status_code} payload={payload}")
+    target_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload["result"]
 
 
 def run_single_video(
@@ -147,7 +154,7 @@ def run_single_video(
         min_scene_len=min_scene_len,
         save_image_count=save_image_count,
     )
-    job_id = submit_payload.get("job_id")
+    job_id = submit_payload.get("id")
     if submit_status_code != 200 or not job_id:
         error = f"submit failed: status={submit_status_code} payload={submit_payload}"
         report_json = video_output_dir / "scene_report.json"
@@ -198,7 +205,7 @@ def run_single_video(
         error = status_payload.get("error") or "job failed without error message"
 
     scene_count = len(result_payload.get("scenes", [])) if result_payload else 0
-    image_count = len(result_payload.get("image_files", [])) if result_payload else 0
+    image_count = len(result_payload.get("image_files", [])) if result_payload and isinstance(result_payload.get("image_files"), list) else 0
     elapsed_seconds = time.monotonic() - started_at
 
     report = {

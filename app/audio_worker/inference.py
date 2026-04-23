@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import wave
 from pathlib import Path
@@ -167,20 +166,21 @@ class AudioASRRunner:
         except Exception:
             return None
 
-    def analyze(self, request: dict[str, Any], output_path: Path) -> Path:
-        input_path = Path(request["audio_uri"])
+    def analyze(self, request: dict[str, Any], work_dir: Path) -> dict[str, Any]:
+        params = request.get("params") or {}
+        input_path = Path(request["file_uri"])
         if not input_path.exists():
-            raise FileNotFoundError(f"audio_uri 不存在: {input_path}")
+            raise FileNotFoundError(f"file_uri 不存在: {input_path}")
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_runtime()
 
-        preprocessed_path = self._preprocess(input_path, output_path.parent)
+        preprocessed_path = self._preprocess(input_path, work_dir)
         self.logger.info("Running FunASR generate on %s", preprocessed_path)
         raw_result = self._model.generate(
             input=str(preprocessed_path),
             cache={},
-            language=request.get("language", "auto"),
+            language=params.get("language", "auto"),
             use_itn=True,
             batch_size_s=60,
             merge_vad=True,
@@ -189,14 +189,12 @@ class AudioASRRunner:
 
         primary = self._pick_primary_result(raw_result)
         result = {
-            "job_id": request["job_id"],
             "backend": "funasr",
             "model_id": self.settings.audio_model_id,
             "vad_model_id": self.settings.audio_vad_model_id,
-            "audio_uri": str(input_path),
-            "preprocessed_audio_uri": str(preprocessed_path),
-            "profile": request.get("profile"),
-            "language": request.get("language", "auto"),
+            "file_uri": str(input_path),
+            "profile": params.get("profile", "movie_zh"),
+            "language": params.get("language", "auto"),
             "text": self._extract_text(primary),
             "aed": self._extract_aed(primary),
             "segments": self._extract_segments(primary),
@@ -212,6 +210,4 @@ class AudioASRRunner:
             },
             "raw_result": self._json_safe(raw_result),
         }
-        output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.logger.info("Wrote audio analysis result to %s", output_path)
-        return output_path
+        return result

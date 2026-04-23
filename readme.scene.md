@@ -1,333 +1,145 @@
-# Video-Scene Service Guide
+# Scene Service Guide
 
-本文件只描述 `video-scene` 服务，供后续 agent 或开发者快速接手。
+`scene` 提供单文件场景切分服务。
 
-目标：
+## 设计约束
 
-- 明确 `video-scene` 当前提供什么能力
-- 明确两种访问方式：`API` 和 `Docker + CLI`
-- 给出可以直接执行的最小示例
-- 说明输入输出约束，避免把任务提交到错误路径
+- 一次只处理一个文件
+- 参数统一放在 `input.params`
+- 容器内串行执行
+- 服务端只短期保留任务状态和结果
+- 默认只返回 JSON，不保留 `csv/图片` 等业务产物
 
-## 1. 服务定位
+服务信息：
+- 宿主机端口：`18087`
+- API 容器：`multimedia-ana-video-scene`
+- 算法：`PySceneDetect + ffmpeg + OpenCV`
 
-`video-scene` 用于对视频做场景切分，并导出：
+## 请求接口
 
-- 场景列表
-- 场景统计 CSV
-- 每个场景的关键帧图片
-- 统一的 `analysis.json`
+- `GET /healthz`
+- `GET /readyz`
+- `POST /v1/tasks`
+- `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/{task_id}/result`
 
-当前实现形态：
+## 输入要求
 
-- 单容器服务
-- 容器内串行处理任务
-- 基于 `PySceneDetect + ffmpeg + OpenCV`
+- `input.file_uri` 必须是容器可见的真实文件路径
+- 推荐放在 `/data/multimedia-ana/example-video/`
+- 也支持直接使用 `/data/assets/` 下的只读资产路径
 
-当前镜像：
-
-- `multimedia-ana-video-scene:local`
-
-当前容器：
-
-- `multimedia-ana-video-scene`
-
-## 2. 重要约束
-
-### 输入视频路径
-
-无论走 API 还是 CLI，输入视频都应该放在宿主机和容器都能访问的共享目录里。
-
-当前项目默认共享：
-
-- `/data/multimedia-ana`
-
-推荐输入目录：
-
-- `/data/multimedia-ana/example-video`
-
-### 输出目录
-
-服务默认输出到：
-
-- `/data/multimedia-ana/video-scene/output/<job_id>/`
-
-QA 结果默认输出到：
-
-- `/data/multimedia-ana/testlab/video-scene/runs/<run_id>/`
-
-### 当前默认参数
-
-- `profile = standard`
-- `threshold = 27.0`
-- `min_scene_len = 0.6s`
-- `save_image_count = 3`
-
-注意：
-
-- 当前默认参数在部分视频上会切得过碎
-- `BV1EfQEBjE27.mp4` 和 `BV1ecoABBEMm.mp4` 已验证存在碎片化问题
-
-## 3. 何时用哪种方式
-
-### 用 API
-
-适合：
-
-- 需要统一服务入口
-- 需要异步提交任务
-- 需要轮询任务状态
-- 需要被其他 agent、脚本、调度器复用
-
-### 用 Docker + CLI
-
-适合：
-
-- 临时手工验证
-- 快速单文件调试
-- 不想走 job 管理，只想直接跑一次场景检测
-
-## 4. 启动服务
-
-构建镜像：
+## 最小请求
 
 ```bash
-cd /home/kun/tools/multimedia-ana
-bash scripts/build.sh scene
-```
-
-启动服务：
-
-```bash
-cd /home/kun/tools/multimedia-ana
-docker compose up -d video-scene
-```
-
-健康检查：
-
-```bash
-curl http://127.0.0.1:18087/health
-```
-
-预期：
-
-- 返回 `ok: true`
-- 返回 `worker_online: true`
-
-## 5. 方式一：通过 API 使用
-
-### API 地址
-
-宿主机访问：
-
-- `http://127.0.0.1:18087`
-
-同一 Docker 网络内访问：
-
-- `http://video-scene:7860`
-
-### 可用接口
-
-- `GET /health`
-- `POST /jobs`
-- `GET /jobs/{job_id}`
-- `GET /jobs/{job_id}/result`
-
-### 5.1 提交任务
-
-```bash
-curl -X POST http://127.0.0.1:18087/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "video_uri": "/data/multimedia-ana/example-video/BV1CidqBUE2R.mp4",
-    "profile": "standard",
-    "threshold": 27.0,
-    "min_scene_len": "0.6s",
-    "save_image_count": 3
-  }'
-```
-
-成功时返回示例：
-
-```json
+curl -X POST http://127.0.0.1:18087/v1/tasks \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data-binary @- <<'JSON'
 {
-  "job_id": "job_20260421_024129_03a51725",
-  "status": "queued"
+  "input": {
+    "file_uri": "/data/multimedia-ana/example-video/proxy_v1.local.mp4",
+    "params": {
+      "profile": "standard",
+      "detector": "content",
+      "threshold": 27.0,
+      "min_scene_len": "0.6s",
+      "downscale": 0,
+      "frame_skip": 0,
+      "save_image_count": 0,
+      "include_artifacts": false
+    }
+  },
+  "options": {
+    "wait_seconds": 0
+  }
 }
+JSON
 ```
 
-### 5.2 查询任务状态
+## 输入字段
 
-```bash
-curl http://127.0.0.1:18087/jobs/job_20260421_024129_03a51725
-```
+- `input.file_uri`: 必填，单个视频文件路径
+- `input.messages`: 预留字段，当前 `scene` 不使用
+- `input.params.profile`: 可选，默认 `standard`
+- `input.params.detector`: 可选，默认 `content`，当前仅支持该值
+- `input.params.threshold`: 可选，默认 `27.0`
+- `input.params.min_scene_len`: 可选，默认 `0.6s`
+- `input.params.downscale`: 可选，默认 `0`
+- `input.params.frame_skip`: 可选，默认 `0`
+- `input.params.save_image_count`: 默认 `0`
+- `input.params.include_artifacts`: 默认 `false`
+- `options.wait_seconds`: 可选
 
-状态通常会经历：
+说明：
+- `threshold` 越高，切分越保守
+- `min_scene_len` 越大，越不容易出现碎片化短镜头
+- `downscale` 和 `frame_skip` 用于提速，但可能影响精度
+- `include_artifacts=true` 时，会返回 `stats_csv`、`scenes_csv`、`image_files`
 
-- `queued`
-- `running`
-- `succeeded` 或 `failed`
+## 返回结果
 
-### 5.3 获取结果
-
-返回任务状态包装：
-
-```bash
-curl http://127.0.0.1:18087/jobs/job_20260421_024129_03a51725/result
-```
-
-直接下载 `analysis.json`：
-
-```bash
-curl -L http://127.0.0.1:18087/jobs/job_20260421_024129_03a51725/result?download=true \
-  -o /tmp/video-scene-analysis.json
-```
-
-### 5.4 一段最小轮询示例
-
-```bash
-JOB_ID="$(curl -sS -X POST http://127.0.0.1:18087/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "video_uri": "/data/multimedia-ana/example-video/BV1CidqBUE2R.mp4",
-    "profile": "standard",
-    "threshold": 27.0,
-    "min_scene_len": "0.6s",
-    "save_image_count": 3
-  }' | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
-
-while true; do
-  STATUS="$(curl -sS "http://127.0.0.1:18087/jobs/${JOB_ID}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
-  echo "job=${JOB_ID} status=${STATUS}"
-  if [ "${STATUS}" = "succeeded" ] || [ "${STATUS}" = "failed" ]; then
-    break
-  fi
-  sleep 2
-done
-
-curl -L "http://127.0.0.1:18087/jobs/${JOB_ID}/result?download=true" \
-  -o "/tmp/${JOB_ID}.json"
-```
-
-## 6. 方式二：通过 Docker + CLI 使用
-
-这里不经过 API，而是直接在镜像里运行 `scenedetect`。
-
-适合快速验证单个视频。
-
-### 6.1 直接用 `docker run`
-
-```bash
-docker run --rm \
-  --user 1001:1003 \
-  -v /data/multimedia-ana:/data/multimedia-ana \
-  multimedia-ana-video-scene:local \
-  python3 -m scenedetect \
-    -i /data/multimedia-ana/example-video/BV1CidqBUE2R.mp4 \
-    -o /data/multimedia-ana/video-scene/manual/BV1CidqBUE2R \
-    -s /data/multimedia-ana/video-scene/manual/BV1CidqBUE2R/stats.csv \
-    -m 0.6s \
-    detect-content --threshold 27.0 \
-    list-scenes --skip-cuts \
-    save-images --num-images 3
-```
-
-执行后可在这里查看结果：
-
-- `/data/multimedia-ana/video-scene/manual/BV1CidqBUE2R/`
-
-典型产物：
-
-- `stats.csv`
-- `BV1CidqBUE2R-Scenes.csv`
-- `Scene-*.jpg`
-
-### 6.2 用 `docker compose run`
-
-如果你想复用 compose 定义，也可以这样跑：
-
-```bash
-docker compose run --rm \
-  --entrypoint python3 \
-  video-scene \
-  -m scenedetect \
-  -i /data/multimedia-ana/example-video/BV1CidqBUE2R.mp4 \
-  -o /data/multimedia-ana/video-scene/manual/BV1CidqBUE2R \
-  -s /data/multimedia-ana/video-scene/manual/BV1CidqBUE2R/stats.csv \
-  -m 0.6s \
-  detect-content --threshold 27.0 \
-  list-scenes --skip-cuts \
-  save-images --num-images 3
-```
-
-## 7. 输出结果说明
-
-API 模式下载到的 `analysis.json` 主要包含：
-
-- `job_id`
+核心字段：
 - `service`
-- `video_uri`
-- `threshold`
-- `min_scene_len`
-- `scene_count`
-- `image_count`
-- `stats_csv`
-- `scenes_csv`
-- `image_files`
+- `file_uri`
+- `params`
+- `summary`
 - `scenes`
 
-其中 `scenes` 的每个条目包含：
+调用方应优先消费：
+- `summary.scene_count`
+- `scenes`
 
-- `scene_number`
-- `start_frame`
-- `start_timecode`
-- `start_seconds`
-- `end_frame`
-- `end_timecode`
-- `end_seconds`
-- `length_frames`
-- `length_timecode`
-- `length_seconds`
+默认不返回：
+- `artifacts`
 
-## 8. 常见问题
-
-### 没有生成新测试产物
-
-先检查：
-
-- QA 是否真的跑的是当前仓库下的 `qa/run_suite.sh`
-- `API_BASE_URL` 是否指向 `http://video-scene:7860`
-- `/data/multimedia-ana/testlab/video-scene/runs/` 下是否生成了新的 `run_id`
-
-### API 健康检查失败
-
-检查：
+## 轮询示例
 
 ```bash
-docker compose ps video-scene
-docker logs --tail 200 multimedia-ana-video-scene
+TASK_ID="$(curl -sS -X POST http://127.0.0.1:18087/v1/tasks \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data-binary @- <<'JSON' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+{
+  "input": {
+    "file_uri": "/data/multimedia-ana/example-video/proxy_v1.local.mp4",
+    "params": {
+      "profile": "standard",
+      "detector": "content",
+      "threshold": 27.0,
+      "min_scene_len": "0.6s",
+      "downscale": 0,
+      "frame_skip": 0,
+      "save_image_count": 0,
+      "include_artifacts": false
+    }
+  },
+  "options": {
+    "wait_seconds": 0
+  }
+}
+JSON
+)"
+
+while true; do
+  STATUS="$(curl -sS "http://127.0.0.1:18087/v1/tasks/${TASK_ID}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+  echo "task=${TASK_ID} status=${STATUS}"
+  if [ "${STATUS}" = "succeeded" ] || [ "${STATUS}" = "failed" ] || [ "${STATUS}" = "canceled" ]; then
+    break
+  fi
+  sleep 1
+done
+
+curl -sS "http://127.0.0.1:18087/v1/tasks/${TASK_ID}/result"
 ```
 
-### 场景切分过碎
+## 当前验证结果
 
-优先尝试提高阈值或增大最小场景长度，例如：
+参考：
+- [scene proxy_v1 测试报告](./docs/scene-proxy-v1-test-20260422.md)
 
-- `threshold = 30.0`
-- `threshold = 32.0`
-- `min_scene_len = 1.0s`
-- `min_scene_len = 1.5s`
+## 常用命令
 
-## 9. 建议给后续 agent 的工作方式
-
-如果是系统集成、脚本联调、批量处理：
-
-- 优先用 API
-
-如果是单文件排障、算法调参、快速肉眼检查：
-
-- 优先用 Docker + CLI
-
-如果要做回归测试：
-
-- 使用 `qa/` 目录下的 Docker 化测试入口
-- 不要把测试逻辑重新写回宿主机
+```bash
+bash scripts/build.sh scene
+docker compose up -d video-scene
+curl http://127.0.0.1:18087/healthz
+```

@@ -9,6 +9,12 @@ def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     return int(value) if value is not None else default
 
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value is not None else default
+
+
 @dataclass(frozen=True)
 class Settings:
     app_title: str = os.getenv("APP_TITLE", "Multimedia Analysis API")
@@ -31,13 +37,11 @@ class Settings:
     audio_model_id: str = os.getenv("AUDIO_MODEL_ID", "iic/SenseVoiceSmall")
     audio_vad_model_id: str = os.getenv("AUDIO_VAD_MODEL_ID", "fsmn-vad")
     audio_device: str = os.getenv("AUDIO_DEVICE", "cuda:0")
-    video_vl_prompt_template: str = (
-        "请对这个视频片段进行电影镜头级语义标注，并严格输出 JSON 对象。"
-        "字段包含 scene_summary、shot_type、characters、actions、emotion、location、objects、cinematic_tags、clip_value、reason。"
-    )
-    video_vl_max_tokens: int = 1024
-    video_vl_temperature: float = 0.7
-    video_vl_top_p: float = 0.8
+    task_result_ttl_hours: int = _env_int("TASK_RESULT_TTL_HOURS", 24)
+    task_wait_poll_interval_seconds: float = _env_float("TASK_WAIT_POLL_INTERVAL_SECONDS", 0.5)
+    video_vl_default_max_output_tokens: int = _env_int("VIDEO_VL_DEFAULT_MAX_OUTPUT_TOKENS", 1024)
+    video_vl_default_temperature: float = _env_float("VIDEO_VL_DEFAULT_TEMPERATURE", 0.7)
+    video_vl_default_top_p: float = _env_float("VIDEO_VL_DEFAULT_TOP_P", 0.8)
     video_vl_transformers_max_frames: int = 64
     video_vl_transformers_min_pixels: int = 4 * 32 * 32
     video_vl_transformers_max_pixels: int = 256 * 32 * 32
@@ -63,6 +67,10 @@ class Settings:
     @property
     def runtime_dir(self) -> Path:
         return self.service_root / "runtime"
+
+    @property
+    def tasks_db_path(self) -> Path:
+        return self.runtime_dir / "tasks.db"
 
     @property
     def cache_dir(self) -> Path:

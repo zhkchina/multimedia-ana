@@ -24,36 +24,47 @@ if [[ "$(realpath "${VIDEO_SRC}")" != "$(realpath "${TARGET_VIDEO_PATH}")" ]]; t
   cp -f "${VIDEO_SRC}" "${TARGET_VIDEO_PATH}"
 fi
 
-echo "==> Health check: ${API_BASE_URL}/health"
-curl --fail --silent --show-error "${API_BASE_URL}/health"
+echo "==> Health check: ${API_BASE_URL}/healthz"
+curl --fail --silent --show-error "${API_BASE_URL}/healthz"
 echo
 
-echo "==> Submit job for ${TARGET_VIDEO_PATH}"
-JOB_RESPONSE="$(curl --fail --silent --show-error \
-  -X POST "${API_BASE_URL}/jobs" \
+echo "==> Submit task for ${TARGET_VIDEO_PATH}"
+TASK_RESPONSE="$(curl --fail --silent --show-error \
+  -X POST "${API_BASE_URL}/v1/tasks" \
   -H 'Content-Type: application/json' \
   -d "{
-    \"video_uri\": \"${TARGET_VIDEO_PATH}\",
-    \"profile\": \"standard\",
-    \"sample_fps\": 1.0,
-    \"max_frames\": 128
+    \"input\": {
+      \"file_uri\": \"${TARGET_VIDEO_PATH}\",
+      \"messages\": [
+        {\"role\": \"system\", \"content\": \"你是一个电影视频分析助手。\"},
+        {\"role\": \"user\", \"content\": \"请输出结构化视频语义理解结果。\"}
+      ],
+      \"params\": {
+        \"profile\": \"standard\",
+        \"sample_fps\": 1.0,
+        \"max_frames\": 128
+      }
+    },
+    \"options\": {
+      \"wait_seconds\": 0
+    }
   }")"
 
-echo "${JOB_RESPONSE}"
+echo "${TASK_RESPONSE}"
 echo
 
-JOB_ID="$(printf '%s' "${JOB_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
-echo "==> Job ID: ${JOB_ID}"
+TASK_ID="$(printf '%s' "${TASK_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+echo "==> Task ID: ${TASK_ID}"
 
 STATUS=""
 for ((i=1; i<=MAX_POLLS; i++)); do
-  STATUS_RESPONSE="$(curl --fail --silent --show-error "${API_BASE_URL}/jobs/${JOB_ID}")"
+  STATUS_RESPONSE="$(curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${TASK_ID}")"
   STATUS="$(printf '%s' "${STATUS_RESPONSE}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
   echo "[${i}/${MAX_POLLS}] status=${STATUS}"
 
   if [[ "${STATUS}" == "succeeded" ]]; then
     echo "==> Fetch result"
-    curl --fail --silent --show-error "${API_BASE_URL}/jobs/${JOB_ID}/result"
+    curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${TASK_ID}/result"
     echo
     exit 0
   fi
@@ -67,5 +78,5 @@ for ((i=1; i<=MAX_POLLS; i++)); do
   sleep "${POLL_INTERVAL_SECONDS}"
 done
 
-echo "==> Timeout waiting for job completion: ${JOB_ID}" >&2
+echo "==> Timeout waiting for task completion: ${TASK_ID}" >&2
 exit 3

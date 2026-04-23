@@ -5,28 +5,37 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
-class JobCreateRequest(BaseModel):
-    audio_uri: str = Field(min_length=1, description="宿主机或共享卷内的本地音频或视频文件路径")
-    language: str = Field(default="auto")
-    profile: str = Field(default="movie_zh")
-    metadata: dict[str, Any] | None = None
+class TaskOptions(BaseModel):
+    wait_seconds: int = Field(default=0, ge=0, le=3600)
 
-    @field_validator("profile")
+
+class Message(BaseModel):
+    role: str = Field(default="user")
+    content: Any
+
+
+class FileTaskInput(BaseModel):
+    file_uri: str = Field(min_length=1, description="宿主机或共享卷内的单文件路径")
+    messages: list[Message] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("params")
     @classmethod
-    def validate_profile(cls, value: str) -> str:
-        if value != "movie_zh":
-            raise ValueError("profile 第一版仅支持 movie_zh。")
+    def validate_params(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("params 必须是 JSON 对象。")
         return value
 
 
-class JobCreateResponse(BaseModel):
-    job_id: str
-    status: str
+class TaskCreateRequest(BaseModel):
+    input: FileTaskInput
+    options: TaskOptions = Field(default_factory=TaskOptions)
+    metadata: dict[str, Any] | None = None
 
 
 class HealthResponse(BaseModel):
     status: str
     service: str
     worker_online: bool
-    queued_jobs: int
+    queued_tasks: int
     worker: dict | None = None

@@ -51,19 +51,30 @@ declare -A JOB_VIDEO=()
 submit_job() {
   local video_path="$1"
   curl --fail --silent --show-error \
-    -X POST "${API_BASE_URL}/jobs" \
+    -X POST "${API_BASE_URL}/v1/tasks" \
     -H 'Content-Type: application/json' \
     -d "{
-      \"video_uri\": \"${video_path}\",
-      \"profile\": \"${PROFILE}\",
-      \"sample_fps\": ${SAMPLE_FPS},
-      \"max_frames\": ${MAX_FRAMES}
+      \"input\": {
+        \"file_uri\": \"${video_path}\",
+        \"messages\": [
+          {\"role\": \"system\", \"content\": \"你是一个电影视频分析助手。\"},
+          {\"role\": \"user\", \"content\": \"请输出结构化视频语义理解结果。\"}
+        ],
+        \"params\": {
+          \"profile\": \"${PROFILE}\",
+          \"sample_fps\": ${SAMPLE_FPS},
+          \"max_frames\": ${MAX_FRAMES}
+        }
+      },
+      \"options\": {
+        \"wait_seconds\": 0
+      }
     }"
 }
 
 poll_status() {
-  local job_id="$1"
-  curl --fail --silent --show-error "${API_BASE_URL}/jobs/${job_id}"
+  local task_id="$1"
+  curl --fail --silent --show-error "${API_BASE_URL}/v1/tasks/${task_id}"
 }
 
 start_gpu_monitor() {
@@ -89,7 +100,7 @@ stop_gpu_monitor() {
 trap stop_gpu_monitor EXIT
 
 echo "==> Health check"
-curl --fail --silent --show-error "${API_BASE_URL}/health"
+curl --fail --silent --show-error "${API_BASE_URL}/healthz"
 echo
 
 echo "==> Start GPU monitor: ${GPU_CSV}"
@@ -100,7 +111,7 @@ for ((i=1; i<=JOB_COUNT; i++)); do
   video_index="$(( (i - 1) % ${#VIDEO_FILES[@]} ))"
   video_path="${VIDEO_FILES[${video_index}]}"
   response="$(submit_job "${video_path}")"
-  job_id="$(printf '%s' "${response}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')"
+  job_id="$(printf '%s' "${response}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
   JOB_IDS+=("${job_id}")
   SUBMIT_TS["${job_id}"]="$(date +%s)"
   STATUS["${job_id}"]="queued"
@@ -210,7 +221,7 @@ gpu_summary = {
 
 jobs = []
 for job_id in job_ids:
-    start_ts = first_ts(job_id, "Picked up job")
+    start_ts = first_ts(job_id, "Picked up task")
     end_ts = first_ts(job_id, "finished successfully")
     start_epoch = to_epoch(start_ts)
     end_epoch = to_epoch(end_ts)

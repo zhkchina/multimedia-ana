@@ -5,29 +5,37 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
-class SceneJobCreateRequest(BaseModel):
-    video_uri: str = Field(min_length=1, description="宿主机或共享卷内的视频路径")
-    profile: str = Field(default="standard")
-    min_scene_len: str = Field(default="0.6s")
-    threshold: float = Field(default=27.0, ge=0.0, le=255.0)
-    save_image_count: int = Field(default=3, ge=0, le=10)
-    metadata: dict[str, Any] | None = None
+class TaskOptions(BaseModel):
+    wait_seconds: int = Field(default=0, ge=0, le=3600)
 
-    @field_validator("profile")
+
+class Message(BaseModel):
+    role: str = Field(default="user")
+    content: Any
+
+
+class FileTaskInput(BaseModel):
+    file_uri: str = Field(min_length=1, description="宿主机或共享卷内的单文件路径")
+    messages: list[Message] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("params")
     @classmethod
-    def validate_profile(cls, value: str) -> str:
-        if value not in {"draft", "standard", "deep"}:
-            raise ValueError("profile 仅支持 draft / standard / deep。")
+    def validate_params(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("params 必须是 JSON 对象。")
         return value
 
 
-class JobCreateResponse(BaseModel):
-    job_id: str
-    status: str
+class TaskCreateRequest(BaseModel):
+    input: FileTaskInput
+    options: TaskOptions = Field(default_factory=TaskOptions)
+    metadata: dict[str, Any] | None = None
 
 
 class HealthResponse(BaseModel):
-    ok: bool
+    status: str
+    service: str
     worker_online: bool
-    queued_jobs: int
+    queued_tasks: int
     worker: dict | None = None

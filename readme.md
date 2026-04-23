@@ -1,77 +1,93 @@
-本文件夹提供一套面向电影理解与视频二创的视频理解工具。
+本目录提供 Docker 化的多媒体解析服务。
 
-目标：
-- 提供视频标注、视频切片与场景分析、语义识别、语义活动检测、ASR、VAD、forced alignment 等基础能力。
-- 所有能力均通过 API 暴露，不直接耦合业务系统。
-- 采用 Docker 化部署，避免污染宿主环境。
-- 采用类似 `~/tools/index-tts` 的访问接口风格。
-- 不同服务容器之间可以独立运行、独立调用；同一个服务容器内部任务串行执行。
+统一原则：
+- 输入音频或视频
+- 输出 JSON
+- 一次一个文件
+- 调用方决定批量调用策略
+- 服务之间独立运行、独立调用
+- 同一服务容器内串行执行
+- 宿主机不安装 Python 运行依赖
 
-当前重点：
-- 视频标注模型优先采用 Qwen3-VL 系列。
-- 已确认本机存在镜像：`qwenllm/qwenvl:qwen3vl-cu128`。
-- 当前仓库只负责分析，不负责结果融合或视频构建。
+当前服务：
+- `qwen3-vl`：视频语义理解，宿主机端口 `18086`
+- `scene`：场景切分，宿主机端口 `18087`
+- `audio`：ASR / AED / 段级时间轴，宿主机端口 `18088`
 
-设计文档：
+统一 API：
+- `GET /healthz`
+- `GET /readyz`
+- `POST /v1/tasks`
+- `GET /v1/tasks/{task_id}`
+- `GET /v1/tasks/{task_id}/result`
+
+统一请求骨架：
+
+```json
+{
+  "input": {
+    "file_uri": "/data/multimedia-ana/example-video/proxy_v1.local.mp4",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请输出结构化结果。"
+      }
+    ],
+    "params": {}
+  },
+  "options": {
+    "wait_seconds": 0
+  }
+}
+```
+
+说明：
+- `input.file_uri`：单文件路径
+- `input.messages`：由调用方提供，允许特殊符号和长提示词，推荐用标准 JSON 编码发送
+- `input.params`：服务私有参数
+- `options.wait_seconds`：等待秒数；长任务由调用方轮询
+
+当前实现形态：
+- `qwen3-vl`：轻量常驻 API + 按需 GPU worker
+- `audio`：轻量常驻 API + 按需 GPU worker
+- `scene`：单容器 API，容器内串行执行
+- 三个服务都用 SQLite 保存短期任务状态和结果
+
+启动：
+```bash
+bash scripts/build.sh
+bash scripts/up.sh
+docker compose up -d audio-api video-scene
+```
+
+常用运维：
+```bash
+bash scripts/down.sh
+bash scripts/logs.sh api
+bash scripts/logs.sh audio-api
+bash scripts/logs.sh worker
+```
+
+服务文档：
+- [Qwen3-VL Guide](./readme.qwen.md)
+- [Scene Guide](./readme.scene.md)
+- [Audio Guide](./readme.audio.md)
+
+架构与设计：
+- [轻量多媒体 API 统一重构方案](./docs/lightweight-api-refactor-plan.md)
 - [视频理解总体架构](./docs/video-understanding-architecture.md)
 - [Qwen3-VL Transformers 后端说明](./docs/qwen3-vl-transformers-backend.md)
-  - 含当前性能测试结论、队列复用结论、GPU 占用统计和 `flash_attention_2` 评估
-- [工程完备性差距分析](./docs/engineering-gap-analysis.md)
 - [FunASR 音频服务接入方案](./docs/funasr-audio-service-plan.md)
-  - 含 `SenseVoiceSmall + fsmn-vad` 选型、API 方案、Docker 镜像与部署建议
+- [工程完备性差距分析](./docs/engineering-gap-analysis.md)
 
-当前已实现：
-- 常驻 `docker-api` FastAPI 控制面
-- 按需拉起 `video-vl` worker 容器
-- `video-scene` 单容器 API
-- `video-scene` 独立 `qa/` 测试目录与 Docker 化测试入口
-- worker 空闲默认保活 `1800s`，减少队列场景下的重复冷启动
-- 统一数据根目录：`/data/multimedia-ana`
-- 宿主机高位端口对外暴露：`18086`
-- `POST /jobs`、`GET /jobs/{job_id}`、`GET /jobs/{job_id}/result`、`GET /health`
-- `video-vl` 默认按官方 README 推荐方式接入 `transformers`
-- 默认模型：`Qwen/Qwen3-VL-8B-Instruct`
-- 已去掉 `vLLM` 路线与相关配置，避免误导
+测试与报告：
+- [QA Guide](./qa/README.md)
+- [重构前后对比](./docs/refactor-comparison-20260422.md)
+- [统一协议回归测试](./docs/protocol-regression-20260422.md)
+- [proxy_v1 模型模块热态测试](./docs/proxy-v1-model-benchmark-20260422.md)
 
-启动方式：
-- `docker compose build`
-- `docker compose up -d docker-api`
-- 如果只想单独补构建 worker：`docker compose build video-vl-worker`
-- 如果只想单独构建 `video-scene` 镜像：`bash scripts/build.sh scene`
-- 如果只启动 `video-scene`：`docker compose up -d video-scene`
-
-常规运维脚本：
-- `bash scripts/build.sh`
-- `bash scripts/build.sh api`
-- `bash scripts/build.sh worker`
-- `bash scripts/build.sh scene`
-- `bash scripts/up.sh`
-- `bash scripts/down.sh`
-- `bash scripts/logs.sh api`
-- `bash scripts/logs.sh worker`
-- `bash scripts/submit_job.sh /data/multimedia-ana/your_video.mp4`
-- `bash scripts/benchmark_two_jobs.sh /data/multimedia-ana/your_video.mp4`
-- `bash scripts/benchmark_n_jobs.sh 5`
-  默认循环输入 `/data/multimedia-ana/example-video/` 下的视频，也可用 `VIDEO_DIR=/your/path` 覆盖目录。
-
-联调脚本：
-- `bash scripts/smoke_test_video_vl.sh /path/to/video.mp4`
-- 默认调用 `http://127.0.0.1:18086`
-- 默认把测试视频复制到 `/data/multimedia-ana/smoke_test_input.mp4`
-
-QA 测试：
-- `bash qa/build_image.sh`
-- `bash qa/run_suite.sh`
-- 默认批量处理 `/data/multimedia-ana/example-video/` 下所有视频
-- 测试结果归档到 `/data/multimedia-ana/testlab/video-scene/runs/`
-
-`video-scene` API：
-- `http://127.0.0.1:18087/health`
-- `POST /jobs`
-- `GET /jobs/{job_id}`
-- `GET /jobs/{job_id}/result`
-
-当前限制：
-- 首次运行 `video-vl` worker 时，如本地没有模型权重，会下载 `Qwen/Qwen3-VL-8B-Instruct` 到 `/data/multimedia-ana/video-vl/cache/huggingface`。
-- `video-scene` 当前采用单容器 API，任务在容器内串行执行。
-- `audio` 还未接入。
+重要约束：
+- 输入文件必须是 Docker 容器可见的真实文件路径，推荐放在 `/data/multimedia-ana/` 下。
+- 指向宿主机其他目录的软链接可能在容器内不可见。像 `proxy_v1.mp4 -> /home/kun/assets/...` 这种情况，需要先物化到 `/data/multimedia-ana` 下再提交。
+- 服务器端默认不保留业务结果文件；任务状态和结果只短期保存在 SQLite 中。
+- 当前服务额外只读挂载了 `/data/assets:/data/assets:ro`，可直接把 `input.file_uri` 指向 `/data/assets/` 下的媒体资产。

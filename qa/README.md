@@ -3,14 +3,14 @@
 这套测试子系统与主服务目录隔离，默认只使用：
 
 - 仓库内 `qa/` 目录存放脚本与镜像定义
-- `/data/multimedia-ana/testlab/video-scene` 存放测试输入清单、运行结果和关键帧产物
+- `/data/multimedia-ana/testlab/` 存放测试运行结果
 
 它不会修改宿主机 Python 环境，也不会要求在本机直接安装依赖。
 `qa/*.sh` 会优先读取仓库根目录的 `.env`，复用其中的 `HOST_UID` 和 `HOST_GID`，避免测试资源变成 `root` 或 `nobody` 属主。
 
 说明：
-- `video-scene-api` 容器负责真正处理任务
-- `qa` 镜像是一个纯 Python 测试客户端，只负责调用 API 和归档结果
+- 各服务容器负责真正处理任务
+- `qa` 镜像是纯 Python 测试客户端，只负责调用统一 `/v1/tasks` API 和归档结果
 
 ## 目录
 
@@ -19,6 +19,9 @@ qa/
   Dockerfile
   requirements.txt
   build_image.sh
+  run_multimedia_suite.sh
+  run_multimedia_suite.py
+  compare_multimedia_runs.py
   run_suite.sh
   run_scene_suite.py
 ```
@@ -32,9 +35,9 @@ qa/
 
 ## 目标
 
-1. 批量遍历 `/data/multimedia-ana/example-video/` 下所有视频
-2. 在 Docker 内通过 `video-scene-api` 提交任务、轮询状态并下载结果
-3. 归档每个视频的结果 JSON 和汇总 JSON
+1. 在 Docker 网络内调用统一 `/v1/tasks` 接口
+2. 提交单文件任务、轮询状态并获取结果 JSON
+3. 归档测试结果和汇总 JSON
 
 ## 使用顺序
 
@@ -74,6 +77,31 @@ SAVE_IMAGE_COUNT=1 \
 bash qa/run_suite.sh
 ```
 
+执行统一多媒体基线：
+
+```bash
+cd /home/kun/tools/multimedia-ana
+bash qa/build_image.sh
+bash qa/run_multimedia_suite.sh
+```
+
+默认行为：
+
+- `api_mode=tasks_v1`
+- 依次测试 `video-vl / scene / audio`
+- 每个服务跑 `2` 次，便于记录冷/热态耗时
+- 结果输出到 `/data/multimedia-ana/testlab/multimedia/runs/<run_id>/summary.json`
+
+前后对比：
+
+```bash
+cd /home/kun/tools/multimedia-ana
+python3 qa/compare_multimedia_runs.py \
+  --before /data/multimedia-ana/testlab/multimedia/runs/<before_run>/summary.json \
+  --after /data/multimedia-ana/testlab/multimedia/runs/<after_run>/summary.json \
+  --output-md /data/multimedia-ana/testlab/multimedia/comparison.md
+```
+
 ## 结果位置
 
 每次运行会生成：
@@ -86,6 +114,6 @@ bash qa/run_suite.sh
 ## 当前限制
 
 - 当前 QA 依赖本机已经启动 `video-scene-api`
-- 当前默认通过 Docker 网络 `multimedia-ana_default` 直接访问 `http://video-scene:7860`
-- 当前只覆盖 `detect-content` 路线
-- 关键帧图片仍由服务写入 `/data/multimedia-ana/video-scene/output/<job_id>/`
+- 当前默认通过 Docker 网络 `multimedia-ana_default` 访问各服务
+- 当前只覆盖当前单文件 JSON 输出路线
+- `scene` 基准默认使用 `save_image_count=0`、`include_artifacts=false`

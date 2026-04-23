@@ -21,27 +21,40 @@ if [[ ! -f "${VIDEO_PATH}" ]]; then
   exit 1
 fi
 
-if [[ "${VIDEO_PATH}" != "${DATA_ROOT}"/* ]]; then
-  echo "Video must be under ${DATA_ROOT}: ${VIDEO_PATH}" >&2
+if [[ "${VIDEO_PATH}" != "${DATA_ROOT}"/* && "${VIDEO_PATH}" != /data/assets/* ]]; then
+  echo "Video must be under ${DATA_ROOT} or /data/assets: ${VIDEO_PATH}" >&2
   exit 1
 fi
 
 PAYLOAD="$(cat <<EOF
 {
-  "video_uri": "${VIDEO_PATH}",
-  "profile": "${PROFILE}",
-  "sample_fps": ${SAMPLE_FPS},
-  "max_frames": ${MAX_FRAMES}$(
-    if [[ -n "${LANGUAGE}" ]]; then
-      printf ',\n  "language": "%s"' "${LANGUAGE}"
-    fi
-  )
+  "input": {
+    "file_uri": "${VIDEO_PATH}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请输出结构化视频语义理解结果。"
+      }
+    ],
+    "params": {
+      "profile": "${PROFILE}",
+      "sample_fps": ${SAMPLE_FPS},
+      "max_frames": ${MAX_FRAMES}$(
+        if [[ -n "${LANGUAGE}" ]]; then
+          printf ',\n      "language": "%s"' "${LANGUAGE}"
+        fi
+      )
+    }
+  },
+  "options": {
+    "wait_seconds": 0
+  }
 }
 EOF
 )"
 
 curl --fail --silent --show-error \
-  -X POST "${API_BASE_URL}/jobs" \
+  -X POST "${API_BASE_URL}/v1/tasks" \
   -H 'Content-Type: application/json' \
   -d "${PAYLOAD}"
 echo

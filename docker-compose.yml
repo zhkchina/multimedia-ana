@@ -52,9 +52,16 @@ services:
     volumes:
       - .:/workspace:ro
       - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro
       - /var/run/docker.sock:/var/run/docker.sock
 
   video-vl-worker:
+    # 注意：这个 service 主要用于镜像构建和手工调试。
+    # 生产中的按需 worker 是由 docker-api 通过 Docker SDK 动态拉起，
+    # 不会自动继承这里的 volumes/environment/shm_size/user/network 配置。
+    # 修改本段配置时，必须同步更新 app/api/scheduler.py 里的 worker kwargs。
+    # 动态 worker 相关代码、镜像或运行参数变更后，也要删除旧的
+    # multimedia-ana-video-vl-worker 容器，否则客户端可能继续复用旧 worker。
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -69,6 +76,7 @@ services:
     volumes:
       - .:/workspace:ro
       - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro
     command: ["python3", "-m", "app.worker.worker_entry"]
     gpus: all
     shm_size: 16g
@@ -99,9 +107,16 @@ services:
     volumes:
       - .:/workspace:ro
       - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro
       - /var/run/docker.sock:/var/run/docker.sock
 
   audio-worker:
+    # 注意：这个 service 主要用于镜像构建和手工调试。
+    # 生产中的按需 worker 是由 audio-api 通过 Docker SDK 动态拉起，
+    # 不会自动继承这里的 volumes/environment/shm_size/user/network 配置。
+    # 修改本段配置时，必须同步更新 app/audio_api/scheduler.py 里的 worker kwargs。
+    # 动态 worker 相关代码、镜像或运行参数变更后，也要删除旧的
+    # multimedia-ana-audio-worker 容器，否则客户端可能继续复用旧 worker。
     build:
       context: .
       dockerfile: Dockerfile.audio_worker
@@ -117,6 +132,7 @@ services:
     volumes:
       - .:/workspace:ro
       - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro
     command: ["python3", "-m", "app.audio_worker.worker_entry"]
     gpus: all
     shm_size: 8g
@@ -146,3 +162,4 @@ services:
     volumes:
       - .:/workspace:ro
       - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro

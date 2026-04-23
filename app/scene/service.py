@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 from pathlib import Path
 
 from app.core.logging_utils import configure_logging
 from app.core.settings import Settings
-from app.core.store import (
+from app.core.task_store import (
     STATUS_FAILED,
     STATUS_SUCCEEDED,
-    claim_next_queued_job,
+    claim_next_queued_task,
+    count_queued_tasks,
     ensure_runtime_dirs,
-    list_queued_jobs,
     read_worker_state,
-    release_job_lock,
-    update_job_status,
+    store_task_error,
+    store_task_result,
     write_worker_state,
 )
 from app.scene.runner import VideoSceneRunner
@@ -29,8 +30,8 @@ class SceneJobService:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-    def _job_output_path(self, job_id: str) -> Path:
-        return self.settings.output_dir / job_id / "analysis.json"
+    def _task_work_dir(self, task_id: str) -> Path:
+        return self.settings.runtime_dir / "tasks" / task_id
 
     def _write_state(self, status: str, **extra) -> None:
         write_worker_state(
@@ -42,45 +43,42 @@ class SceneJobService:
             },
         )
 
-    def _process_job(self, request: dict) -> None:
-        job_id = request["job_id"]
-        output_path = self._job_output_path(job_id)
-        self._write_state(status="running", job_id=job_id)
+    def _process_task(self, request: dict) -> None:
+        task_id = request["task_id"]
+        work_dir = self._task_work_dir(task_id)
+        self._write_state(status="running", task_id=task_id)
         try:
-            generated_path = self.runner.analyze(request, output_path)
-            update_job_status(
+            result = self.runner.analyze(request, work_dir)
+            store_task_result(
                 self.settings,
-                job_id,
-                status=STATUS_SUCCEEDED,
+                task_id,
+                result=result,
                 worker_id=self.worker_id,
-                result_files=[str(generated_path)],
-                error=None,
             )
-            self._write_state(status="idle", last_job=job_id)
+            self._write_state(status="idle", last_task=task_id)
         except Exception as exc:
-            update_job_status(
+            store_task_error(
                 self.settings,
-                job_id,
-                status=STATUS_FAILED,
+                task_id,
                 worker_id=self.worker_id,
-                result_files=[],
-                error=str(exc),
+                error={"message": str(exc)},
+                status=STATUS_FAILED,
             )
-            self.logger.exception("Scene job %s failed", job_id)
-            self._write_state(status="idle", last_job=job_id, last_error=str(exc))
+            self.logger.exception("Scene task %s failed", task_id)
+            self._write_state(status="idle", last_task=task_id, last_error=str(exc))
         finally:
-            release_job_lock(self.settings, job_id)
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     def _run_loop(self) -> None:
         ensure_runtime_dirs(self.settings)
         self._write_state(status="starting")
         while not self._stop_event.is_set():
-            request = claim_next_queued_job(self.settings, self.worker_id)
+            request = claim_next_queued_task(self.settings, self.worker_id)
             if request is None:
-                self._write_state(status="idle", queued_jobs=len(list_queued_jobs(self.settings)))
+                self._write_state(status="idle", queued_tasks=count_queued_tasks(self.settings))
                 time.sleep(1)
                 continue
-            self._process_job(request)
+            self._process_task(request)
         self._write_state(status="stopped", reason="shutdown")
 
     def start(self) -> None:
@@ -98,9 +96,10 @@ class SceneJobService:
     def health_payload(self) -> dict:
         runtime_state = read_worker_state(self.settings)
         return {
-            "ok": True,
+            "status": "ok",
+            "service": self.settings.service_name,
             "worker_online": self._thread is not None and self._thread.is_alive(),
-            "queued_jobs": len(list_queued_jobs(self.settings)),
+            "queued_tasks": count_queued_tasks(self.settings),
             "worker": {
                 "exists": True,
                 "running": self._thread is not None and self._thread.is_alive(),
