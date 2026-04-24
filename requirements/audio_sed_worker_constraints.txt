@@ -1,0 +1,7 @@
+# Keep the CUDA/PyTorch stack from the base image intact.
+# Base image: pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
+# OpenFLAM 1.0.1 requires torch>=2.6,<2.8, so do not use the
+# torch 2.8 base image for this worker.
+torch==2.7.1+cu128
+torchaudio==2.7.1+cu128
+torchvision==0.22.1+cu128

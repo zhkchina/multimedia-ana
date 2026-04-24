@@ -25,6 +25,21 @@ x-audio-common-env: &audio_common_env
   HF_HOME: /data/multimedia-ana/audio/cache/huggingface
   MODELSCOPE_CACHE: /data/multimedia-ana/audio/cache/modelscope
 
+x-audio-sed-common-env: &audio_sed_common_env
+  DATA_ROOT: /data/multimedia-ana
+  HOME: /data/multimedia-ana/audio-sed/cache/home
+  USER: kun
+  LOGNAME: kun
+  SERVICE_NAME: audio-sed
+  HOST_PROJECT_DIR: /home/kun/tools/multimedia-ana
+  HOST_UID: 1001
+  HOST_GID: 1003
+  HF_HOME: /data/multimedia-ana/audio-sed/cache/huggingface
+  TORCH_HOME: /data/multimedia-ana/audio-sed/cache/torch
+  AUDIO_SED_MODEL_DIR: /data/multimedia-ana/audio-sed/models
+  AUDIO_SED_OPENFLAM_CACHE: /data/multimedia-ana/audio-sed/models/openflam
+  AUDIO_SED_DEVICE: cpu
+
 services:
   docker-api:
     build:
@@ -134,6 +149,26 @@ services:
       - /data/multimedia-ana:/data/multimedia-ana
       - /data/assets:/data/assets:ro
     command: ["python3", "-m", "app.audio_worker.worker_entry"]
+    gpus: all
+    shm_size: 8g
+
+  audio-sed-worker:
+    # 当前阶段用于镜像构建和手工调试。
+    # 后续接入 audio-sed-api 后，动态 worker 的 volumes/environment/shm_size/user/network
+    # 必须与本段保持同步。
+    build:
+      context: .
+      dockerfile: Dockerfile.audio_sed_worker
+    image: multimedia-ana-audio-sed-worker:local
+    container_name: multimedia-ana-audio-sed-worker
+    user: "1001:1003"
+    environment:
+      <<: *audio_sed_common_env
+    volumes:
+      - .:/workspace:ro
+      - /data/multimedia-ana:/data/multimedia-ana
+      - /data/assets:/data/assets:ro
+    command: ["python3", "-m", "app.audio_sed_worker.pipeline", "--help"]
     gpus: all
     shm_size: 8g
 

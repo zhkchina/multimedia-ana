@@ -26,11 +26,14 @@ case "${TARGET}" in
   audio)
     docker_compose build audio-api audio-worker
     ;;
+  audio-sed|audio-sed-worker)
+    docker_compose build audio-sed-worker
+    ;;
   scene|video-scene)
     docker_compose build video-scene
     ;;
   *)
-    echo "Usage: $0 [all|api|worker|audio-api|audio-worker|audio|scene]" >&2
+    echo "Usage: $0 [all|api|worker|audio-api|audio-worker|audio|audio-sed|audio-sed-worker|scene]" >&2
     exit 1
     ;;
 esac

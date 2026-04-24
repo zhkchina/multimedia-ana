@@ -20,11 +20,14 @@ case "${TARGET}" in
   audio-worker)
     docker logs -f multimedia-ana-audio-worker
     ;;
+  audio-sed-worker)
+    docker logs -f multimedia-ana-audio-sed-worker
+    ;;
   compose)
     docker_compose logs -f
     ;;
   *)
-    echo "Usage: $0 [api|worker|audio-api|audio-worker|compose]" >&2
+    echo "Usage: $0 [api|worker|audio-api|audio-worker|audio-sed-worker|compose]" >&2
     exit 1
     ;;
 esac
